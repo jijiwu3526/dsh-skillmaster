@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-BRIDGE_PATH = "/api/local-bridge/auth"
+BRIDGE_PATH = "/local-bridge/auth"
 DEFAULT_SECRET = Path.home() / ".dsh" / "local-bridge.secret"
 
 

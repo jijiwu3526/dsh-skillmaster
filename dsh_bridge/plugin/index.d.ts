@@ -5,7 +5,7 @@ export declare const name: "dsh-local-bridge";
 export declare const inject: string[];
 
 /** Absolute path on the shared `/api` channel. */
-export declare const BRIDGE_PATH: "/api/local-bridge/auth";
+export declare const BRIDGE_PATH: "/local-bridge/auth";
 
 /** 0600 file holding the per-boot shared secret. */
 declare const SECRET_PATH: string;
