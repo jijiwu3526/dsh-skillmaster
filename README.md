@@ -32,6 +32,27 @@ $ dshstudio recommend --want read,grep,web_search --avoid present,job_output
 这条路不可靠。实测同一预设在自述中得到过 13 / 2 / 0 三种结果。
 本工具改读会话归档里的 `request/header` 事件——那是宿主的真实视图。
 
+## 装插件（可选，但推荐）
+
+让本机 CLI 自行取得 token，**不必再从终端复制 URL**。把这段丢给你的 DSH 会话：
+
+```
+https://github.com/jijiwu3526/dsh-skillmaster
+安装其中的 dsh-local-bridge 插件，并告诉我它是否生效。
+```
+
+实际只执行一条命令，无需手改任何配置文件：
+
+```bash
+dsh plugin --profile web add github:jijiwu3526/dsh-skillmaster#subdir=dsh_bridge/plugin
+# 然后重启 DSH
+```
+
+`dsh plugin add` 会装包、登记依赖，并因该包声明了 `dsh.bundle.patch`
+而自动挂进层栈。**零运行时依赖**，只用 Node 内置模块。
+
+细节与排障见 [`dsh_bridge/INSTALL.md`](dsh_bridge/INSTALL.md)。
+
 ## 三分钟上手
 
 ```bash
