@@ -1,0 +1,131 @@
+# The `review-focused` agent preset: derived from `standard`, tuned for
+# code review and analysis rather than autonomous editing.
+#
+# DESIGN RATIONALE
+#   Base: the deployment's own `standard` preset, copied rather than
+#   re-authored, so this file stays valid as the host composition changes.
+#   Removed:
+#     - present     — the Rich-render/HTML artifact tool. It emits large
+#                     rendered deliverables; a review agent should answer in
+#                     prose and cite `file:line`, not generate a deck.
+#     - tool-jobs   — background job runner. Review is a read-then-report
+#                     loop; long unattended batches are out of scope and this
+#                     tool is the main source of runaway background work.
+#   Kept deliberately:
+#     - delegation  — parallel subagents are a genuine review accelerator
+#                     (one agent per file cluster), and it is the only entry
+#                     that pulls in a group-level `isolate` realm.
+#     - planning    — plan mode is exactly the "think before touching" posture
+#                     a review wants, and it hard-blocks mutation.
+#     - tool-web    — reviewers routinely need external references (library
+#                     docs, spec text) to judge a change correctly.
+#   Persona is a `suffix`, not `prefix`, so the deployment's default identity
+#     still applies and this preset layers review discipline on top of it.
+#
+# Structural constraints inherited from `standard` and still observed here:
+#   - Service rows live inside groups carrying an `isolate` realm; the
+#     host composition owns the registries, sandbox, approval stack,
+#     persistence, and model route.
+#   - `!!js process.platform` guards are evaluated per host platform.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    suffix: >-
+      Your working directory is {{cwd}}. You are operating in REVIEW mode.
+      Ground every claim in evidence: cite the concrete `path:line` you read
+      and quote the relevant snippet rather than paraphrasing from memory.
+      Separate what the code demonstrably does from what you infer it intends.
+      When you find a defect, state the failing input or sequence that triggers
+      it, and say plainly when you are unsure. Prefer the smallest correct fix
+      over a redesign, and say when no change is warranted. Do not edit files
+      unless the user explicitly asks you to apply a change.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── planning (plan mode hard-blocks mutation) ───────────────────────────────
+
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+- id: compaction
+  name: '@deepseek-ai/dsh-compaction'
+
+# ── delegation (one subagent per review cluster) ─────────────────────────────
+
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+
+# ── interaction ─────────────────────────────────────────────────────────────
+
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+
+# ── external references ─────────────────────────────────────────────────────
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000

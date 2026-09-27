@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dsh-conversation-studio"
+version = "0.2.0"
+description = "为 DeepSeek Harness 创建、归档并记忆 Agent Preset 会话"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["dsh", "deepseek-harness", "agent-preset", "session", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+]
+# 仅用标准库，无运行时依赖。
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/jijiwu3526/dsh-skillmaster"
+Issues = "https://github.com/jijiwu3526/dsh-skillmaster/issues"
+
+[project.scripts]
+dsh-session = "dsh_session:main"
+dshstudio = "dshstudio.cli:main"
+
+[tool.setuptools]
+packages = ["dshstudio"]
+py-modules = ["dsh_session"]
+
+[tool.setuptools.package-data]
+dshstudio = ["py.typed"]
