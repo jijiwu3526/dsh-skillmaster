@@ -102,7 +102,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--text", required=True, help="让会话可见的首条消息")
     p.add_argument("--workspace-id", required=True)
     p.add_argument("--scenario", default="")
-    p.add_argument("--url", default=os.environ.get("DSH_WEB_URL", "http://127.0.0.1:3080"))
+    p.add_argument("--url", default=None,
+                   help="DSH Web 完整 URL。省略时由 dsh_session 自动解析"
+                        "（桥接插件 → DSH_WEB_URL → 本机地址）")
     p.add_argument("--cookie-file", type=Path,
                     default=Path.home() / ".config/dsh-conversation-studio/cookies.txt")
     p.add_argument("--records-dir", type=Path, default=Path("records"))
@@ -121,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                 mem.remember_profile(profile, notes=args.notes, entries=entries)
                 mem.save()
             out({**profile.as_dict(), "entries": entries,
+                 "notes": args.notes,
                  "saved": not args.no_save,
                  "memory_file": str(args.memory) if not args.no_save else None})
 
@@ -166,21 +169,24 @@ def main(argv: list[str] | None = None) -> int:
                     for name, row in sorted(profiles.items())]})
 
         elif args.cmd == "create":
-            rc = dsh.main(["--url", args.url, "--cookie-file", str(args.cookie_file),
-                           "--timeout", str(args.timeout),
-                           "new", "--workspace-id", args.workspace_id,
+            # Only pass --url when the caller supplied one; otherwise let
+            # dsh_session resolve it (bridge plugin → env → plain origin).
+            # Passing the plain default here would bypass the bridge entirely.
+            base = ["--cookie-file", str(args.cookie_file), "--timeout", str(args.timeout)]
+            if args.url:
+                base = ["--url", args.url, *base]
+
+            rc = dsh.main([*base, "new", "--workspace-id", args.workspace_id,
                            "--preset", args.preset,
                            "--records-dir", str(args.records_dir)])
             if rc != 0:
                 return rc
             receipts = sorted(args.records_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
             sid = json.loads(receipts[-1].read_text())["session_id"]
-            sent = dsh.main(["--url", args.url, "--cookie-file", str(args.cookie_file),
-                             "send", sid, "--text", args.text, "--wait", str(args.wait)])
+            sent = dsh.main([*base, "send", sid, "--text", args.text, "--wait", str(args.wait)])
             learned = None
             if args.archive:
-                dsh.main(["--url", args.url, "--cookie-file", str(args.cookie_file),
-                          "export", sid, "--output", str(args.archive)])
+                dsh.main([*base, "export", sid, "--output", str(args.archive)])
                 if args.archive.exists():
                     profile = profile_from_archive(args.archive)
                     mem.remember_profile(profile, notes=args.scenario,
