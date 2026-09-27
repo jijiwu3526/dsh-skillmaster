@@ -104,8 +104,9 @@ class DshWeb:
                 # the advice in the error message is actually actionable.
                 if not _retried and self._reauthenticate():
                     return self._open(url, data=data, method=method, _retried=True)
-                raise DshHttpError(401, "未认证或 Cookie 已过期。传入 DSH 启动时打印的含 ?token= 的完整 URL，"
-                                         "或删除本机 Cookie 缓存后重试。") from exc
+                raise DshHttpError(401, "未认证或 Cookie 已过期。已尝试自动重新认证但失败——"
+                                         "请确认 dsh-local-bridge 插件已安装且 DSH 正在运行，"
+                                         "或手动传入 DSH 启动时打印的含 ?token= 的完整 URL。") from exc
             raise DshHttpError(exc.code, detail) from exc
         except urllib.error.URLError as exc:
             raise DshError(f"无法连接 DSH Web：{exc.reason}") from exc
@@ -256,10 +257,37 @@ def send_message(web: DshWeb, session_id: str, text: str, *,
     return receipt
 
 
+def resolve_url(explicit: str | None = None, timeout: float = 10.0) -> tuple[str, str]:
+    """Find an authenticated Web URL, preferring the in-process bridge plugin.
+
+    Order: explicit argument → dsh-local-bridge plugin → DSH_WEB_URL → plain
+    loopback origin. The plugin path means a CLI never needs a token pasted
+    in by a human, so nothing sensitive ends up in shell history or a log.
+    """
+    if explicit:
+        return explicit, "explicit"
+    try:
+        from dsh_bridge import resolve as _bridge_resolve
+    except ImportError:
+        _bridge_resolve = None
+    if _bridge_resolve is not None:
+        try:
+            found = _bridge_resolve(timeout=timeout)
+            return found["url"], f"bridge:{found.get('source', '?')}"
+        except Exception:  # noqa: BLE001 — fall through to env/plain origin
+            pass
+    env = os.environ.get("DSH_WEB_URL")
+    if env:
+        return env, "env"
+    return "http://127.0.0.1:3080", "plain-origin"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="DSH Preset 会话创建与完整日志归档")
-    parser.add_argument("--url", default=os.environ.get("DSH_WEB_URL", "http://127.0.0.1:3080"),
-                        help="DSH Web 启动时打印的完整 URL（新版含认证 token）；也可用 DSH_WEB_URL")
+    parser.add_argument("--url", default=None,
+                        help="DSH Web 启动时打印的完整 URL。省略时优先向本机 dsh-local-bridge "
+                             "插件索取一个新鲜的带 token URL（需插件已安装且 DSH 在运行），"
+                             "其次读 DSH_WEB_URL，最后回落到无 token 的本机地址")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--cookie-file", type=Path,
                         default=Path.home() / ".config/dsh-conversation-studio/cookies.txt",
@@ -286,7 +314,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="等待会话脱离 blank 状态的秒数；0 表示只投递不等待")
     args = parser.parse_args(argv)
     try:
-        web = DshWeb(args.url, timeout=args.timeout, cookie_file=args.cookie_file)
+        url, origin = resolve_url(args.url)
+        web = DshWeb(url, timeout=args.timeout, cookie_file=args.cookie_file)
         if args.command == "presets":
             print(json.dumps(preset_list(web), ensure_ascii=False, indent=2))
         elif args.command == "new":

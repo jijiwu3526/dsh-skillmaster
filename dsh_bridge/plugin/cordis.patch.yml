@@ -1,0 +1,12 @@
+# dsh-local-bridge：向本机 CLI 提供带 token 的 Web URL（进程内铸造，无需人工复制）。
+#
+# 这一行挂载后，插件在 DSH 进程内注册 /api/local-bridge/auth 路由。
+# 插件会：
+#   1. 每次启动随机生成一个共享密钥，写入 $DSH_HOME/local-bridge.secret（0600）；
+#   2. 仅接受 loopback 的 Host 头 + 正确的密钥；
+#   3. 通过 ctx.connection.authenticatedUrl() 现场铸造一个新鲜的带 token URL。
+#
+# 插件不记录、不落盘该 URL —— 它只在响应里返回一次。
+- insert:
+    - id: dsh-local-bridge
+      name: 'dsh-local-bridge'
