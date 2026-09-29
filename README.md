@@ -37,14 +37,14 @@ $ dshstudio recommend --want read,grep,web_search --avoid present,job_output
 让本机 CLI 自行取得 token，**不必再从终端复制 URL**。把这段丢给你的 DSH 会话：
 
 ```
-https://github.com/jijiwu3526/dsh-skillmaster
-安装其中的 dsh-local-bridge 插件，并告诉我它是否生效。
+https://github.com/jijiwu3526/dsh-local-bridge
+按它的 README 装这个 DSH 插件，并告诉我是否生效。
 ```
 
 实际只执行一条命令，无需手改任何配置文件：
 
 ```bash
-dsh plugin --profile web add github:jijiwu3526/dsh-skillmaster#subdir=dsh_bridge/plugin
+dsh plugin --profile web add github:jijiwu3526/dsh-local-bridge
 # 然后重启 DSH
 ```
 
@@ -214,9 +214,6 @@ python3 -m dshstudio.cli incident review-focused "挂载失败：prefix missing"
 | `tests/test_dsh_session.py` | 模拟两代 DSH Web 的协议测试 |
 | `tests/test_memory.py` | 画像提取、记忆持久化与推荐排序测试 |
 
-## 已知边界
-
-- **预设管不到宿主注入的插件。** `mcp__computer_use__*` 和 `mcp__node_repl__js`
   不由预设决定，它们由宿主 profile 注入，会出现在任何预设的会话里。
   要真正限制工具面，必须在宿主配置层处理。
 - **推荐只覆盖已学习过的预设。** 先 `observe` 若干归档，候选才会变多。

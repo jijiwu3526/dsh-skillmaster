@@ -7,14 +7,14 @@
 把这个链接丢给你的 DSH 会话：
 
 ```
-https://github.com/jijiwu3526/dsh-skillmaster
-安装其中的 dsh-local-bridge 插件，并告诉我它是否生效。
+https://github.com/jijiwu3526/dsh-local-bridge
+按它的 README 装这个 DSH 插件，并告诉我是否生效。
 ```
 
 会话会执行下面这一步（**唯一的一步**）：
 
 ```bash
-dsh plugin --profile web add github:jijiwu3526/dsh-skillmaster#subdir=dsh_bridge/plugin
+dsh plugin --profile web add github:jijiwu3526/dsh-local-bridge
 ```
 
 然后**重启 DSH**。

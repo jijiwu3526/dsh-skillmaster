@@ -30,7 +30,7 @@ sys.path.insert(0, str(HERE.parent))
 import dsh_session as dsh  # noqa: E402
 from dshstudio.memory import Memory, default_path  # noqa: E402
 from dshstudio.profile import (  # noqa: E402
-    ArchiveError, Profile, count_entries, profile_from_archive,
+    ArchiveError, count_entries, profile_from_archive,
 )
 
 PRESET_ROOT = Path.home() / ".dsh" / ".agent-presets"
