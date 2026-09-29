@@ -2,6 +2,41 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] — 2026-09-29
+
+### 新增
+
+- **CI**（`.github/workflows/ci.yml`）—— Python 3.10/3.11/3.12/3.13 跑 `unittest`，
+  Node 20/22 跑插件测试。此前所有测试只在本地跑过，改坏不会有人拦。
+- **桥接客户端测试**（`tests/test_bridge.py`）—— `dsh_bridge.py` 此前**零覆盖**。
+  新测试锁定三级回退链（插件 → `DSH_WEB_URL` → 裸 origin）、空密钥文件、
+  403/404/500 的错误文案，以及「凭据绝不经过环境代理」。
+- **插件测试**（`dsh-local-bridge` 仓库的 `test/index.test.js`）—— 144 行的
+  `lib/index.js` 此前没有任何测试。新测试用 mock ctx 覆盖三道防护各自真的会挡：
+  非 loopback Host、错误密钥、密钥文件权限与退出清理。
+- `dsh_bridge/plugin/DEPRECATED.md` —— 标记包内的旧插件副本仅供历史参考。
+
+### 修复
+
+- **类型声明指向了错误路径**：`dsh_bridge/plugin/index.d.ts` 里 `BRIDGE_PATH`
+  的注释仍写「on the shared `/api` channel」，`cordis.patch.yml` 注释写的则是
+  `/api/local-bridge/auth`——**与实际代码 `BRIDGE_PATH = "/local-bridge/auth"`
+  直接矛盾**，会引导使用者在 `/api` 下挂载，重蹈 401 的老路。
+  现两处都写明「故意不在 `/api` 下」及原因。
+- **`pyproject.toml` 声明了不存在的文件**：`package-data` 写了
+  `dshstudio = ["py.typed"]`，但该文件不在仓库里，打 wheel 会告警并静默丢弃。
+  现已补上。
+- **文档里的安装命令是失效的**：`#subdir=dsh_bridge/plugin` 语法在本机
+  pnpm 10.33.4 上**实测失败**（`Could not resolve subdir=...`）。
+  README 与 `INSTALL.md` 已统一指向独立仓库
+  [`dsh-local-bridge`](https://github.com/jijiwu3526/dsh-local-bridge)。
+- README 里重复的「已知边界」章节（拼接仓库首页与包内文档时留下的）。
+
+### 文档
+
+- CHANGELOG 补记 0.2.0 之后新增的插件与桥接客户端。
+- 全仓库扫描确认无 token、无本机绝对路径泄漏。
+
 ## [0.2.0] — 2026-09-27
 
 ### 新增
