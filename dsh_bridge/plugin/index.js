@@ -122,7 +122,16 @@ export function apply(ctx) {
 	// register nothing, so the secret file would outlive the process.
 	ctx.effect(() => () => unlinkSync(secretPath()), "dsh-local-bridge: cleanup");
 
-	ctx.webServer.register({
+	// The route must be owned by an effect, not registered bare.
+	//
+	// `register()` returns a disposer that removes the route from the shared
+	// table, and it THROWS on a duplicate path. Dropping the disposer means
+	// the stale route survives an unload, so the next `apply()` — on any
+	// HMR reload or config change — dies with "duplicate exact route".
+	// cordis swallows that into a dead fiber, leaving no route and no secret
+	// file: a silent, permanent bridge outage. Every other DSH plugin wraps
+	// its registration in `ctx.effect` for exactly this reason.
+	ctx.effect(() => ctx.webServer.register({
 		kind: "exact",
 		path: BRIDGE_PATH,
 		handler: async (req, res) => {
@@ -154,5 +163,5 @@ export function apply(ctx) {
 
 			send(res, 200, { ok: true, url, origin: base, secretPath: secretPath() });
 		},
-	});
+	}), "dsh-local-bridge: route");
 }

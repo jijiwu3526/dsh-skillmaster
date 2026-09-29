@@ -85,8 +85,10 @@ jobs:
           fi
           echo "ok"
       - name: No machine-specific paths
+        # The pattern itself necessarily lives in this file, so workflow YAML
+        # is excluded — otherwise the scan always matches its own source.
         run: |
-          if git grep -n '/Users/' -- .; then
+          if git grep -n '/Users/' -- . ':!.github/*'; then
             echo "::error::a machine-specific absolute path is committed"; exit 1
           fi
           echo "ok"

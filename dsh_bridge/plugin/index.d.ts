@@ -1,8 +1,9 @@
 /** Loopback route that hands a local tool the current authenticated Web URL. */
 import type { Context } from "@deepseek-ai/cordis";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export declare const name: "dsh-local-bridge";
-export declare const inject: string[];
+export declare const inject: ["connection", "webServer"];
 
 /**
  * Absolute route path. Deliberately OUTSIDE `/api`.
@@ -14,17 +15,17 @@ export declare const inject: string[];
  */
 export declare const BRIDGE_PATH: "/local-bridge/auth";
 
-/** 0600 file holding the per-boot shared secret. */
-declare const SECRET_PATH: string;
+/** Absolute path of the 0600 file holding the per-boot shared secret. */
+declare function secretPath(): string;
 
 /** Host headers accepted as loopback. */
 declare const LOOPBACK: Set<string>;
 
 declare function mintSecret(): string;
 declare function persistSecret(value: string): void;
-declare function isLoopback(request: Request): boolean;
+declare function isLoopback(request: IncomingMessage): boolean;
 declare function send(
-	response: unknown,
+	response: ServerResponse,
 	status: number,
 	body: Record<string, unknown>,
 ): void;

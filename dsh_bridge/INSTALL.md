@@ -88,7 +88,7 @@ dsh plugin --profile web remove dsh-local-bridge
 ## 前提
 
 - DSH **≥ 0.1.5-rc.1**（插件声明的 `engines`）
-- 装在 **web profile** —— 它依赖 `webserver` 与 `connection` 两个宿主服务
+- 装在 **web profile** —— 它依赖 `webServer` 与 `connection` 两个宿主服务
 
 如果你用的是别的 profile（例如 `dsh --profile headless`），把命令里的
 `web` 换成对应名字即可，但该 profile 需提供这两个服务。
