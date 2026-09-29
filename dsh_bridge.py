@@ -64,6 +64,11 @@ def fetch_via_bridge(origin: str, secret: str, timeout: float = 10.0) -> dict:
         raise BridgeError(f"桥接返回 HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise BridgeError(f"无法连接桥接 {url}：{exc.reason}（DSH 是否在运行？）") from exc
+    except ValueError as exc:
+        # A 200 carrying something that is not JSON: an HTML error page from a
+        # proxy, a half-written body from a DSH restart mid-request. This is
+        # a bridge failure like any other and must fall back, not crash the CLI.
+        raise BridgeError(f"桥接返回的不是 JSON（DSH 正在重启？）：{exc}") from exc
     if not isinstance(payload, dict) or not payload.get("ok"):
         raise BridgeError(f"桥接返回异常：{payload}")
     return payload
