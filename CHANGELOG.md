@@ -2,6 +2,36 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.1] — 2026-09-29
+
+### 修复
+
+- **`pip install` 装出来的包是坏的**：`pyproject.toml` 的 `py-modules` 只声明了
+  `dsh_session`，漏了 `dsh_bridge`。而 `dsh_session` 正是靠 `from dsh_bridge
+  import resolve` 走桥接的。这个 import 被 `except ImportError` 包着，所以
+  **不会报错**——它只是静默降级到 `DSH_WEB_URL` 或裸 origin，用户永远
+  不知道为什么桥接不工作了。
+
+  实测确认：改动前打出的 wheel 里没有 `dsh_bridge.py`，装进干净 venv 后
+  `from dsh_bridge import resolve` 失败。现已补进 `py-modules`，
+  重新打的 wheel 包含该模块，导入与控制台脚本均正常。
+
+### 新增
+
+- **打包元数据测试**（`tests/test_packaging.py`，9 项）—— 上面这个 bug 在源码
+  树里完全看不出来，只在 `pip install` 之后才暴露，所以要测的是**声明本身**：
+  本地 import 是否都被打包、`py-modules`/`packages` 声明的文件是否存在、
+  `package-data` 指向的文件是否存在、控制台入口点是否真的定义了对应函数、
+  `pyproject` 的版本号是否与 CHANGELOG 对得上。
+
+### 文档
+
+- README 与 `dsh_bridge/INSTALL.md` 补上「从 0.1.0 升级必须完整重启 DSH」：
+  0.1.0 丢弃了路由 disposer，只替换文件会让新实例撞上
+  `duplicate exact route` 而加载失败，桥接一直不通到进程完全重启。
+
+测试 52 → 61。
+
 ## [0.3.0] — 2026-09-29
 
 ### 新增

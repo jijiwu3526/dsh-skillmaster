@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dsh-conversation-studio"
-version = "0.3.0"
+version = "0.3.1"
 description = "为 DeepSeek Harness 创建、归档并记忆 Agent Preset 会话"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,7 +35,10 @@ dshstudio = "dshstudio.cli:main"
 
 [tool.setuptools]
 packages = ["dshstudio"]
-py-modules = ["dsh_session"]
+# `dsh_session` imports `dsh_bridge` to reach the plugin. Leaving it out
+# produced a wheel where that import silently fails, and the CLI degraded to
+# env/plain-origin without ever saying why.
+py-modules = ["dsh_session", "dsh_bridge"]
 
 [tool.setuptools.package-data]
 dshstudio = ["py.typed"]
