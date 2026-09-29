@@ -6,18 +6,38 @@
 
 ### 新增
 
-- **CI**（`.github/workflows/ci.yml`）—— Python 3.10/3.11/3.12/3.13 跑 `unittest`，
-  Node 20/22 跑插件测试。此前所有测试只在本地跑过，改坏不会有人拦。
 - **桥接客户端测试**（`tests/test_bridge.py`）—— `dsh_bridge.py` 此前**零覆盖**。
   新测试锁定三级回退链（插件 → `DSH_WEB_URL` → 裸 origin）、空密钥文件、
-  403/404/500 的错误文案，以及「凭据绝不经过环境代理」。
-- **插件测试**（`dsh-local-bridge` 仓库的 `test/index.test.js`）—— 144 行的
-  `lib/index.js` 此前没有任何测试。新测试用 mock ctx 覆盖三道防护各自真的会挡：
-  非 loopback Host、错误密钥、密钥文件权限与退出清理。
+  403/404/500 的错误文案、「凭据绝不经过环境代理」，以及下述六种
+  传输层失败都必须降级而不是崩掉。
+- **CI**（`.github/workflows/ci.yml`）—— Python 3.10/3.11/3.12/3.13 跑 `unittest`；
+  另有 secret 扫描（token 字面量、本机绝对路径、误提交的运行产物）与
+  「已废弃的插件副本必须与上游逐字节一致」检查。插件仓库另有自己的 CI。
+- **插件测试**（`dsh-local-bridge` 仓库的 `test/index.test.js`，28 项）——
+  此前的插件代码没有任何测试。新测试用 mock ctx 确认三道防护各自真的会挡。
 - `dsh_bridge/plugin/DEPRECATED.md` —— 标记包内的旧插件副本仅供历史参考。
 
 ### 修复
 
+- **桥接不可用时会崩掉 CLI，而不是回退**。`fetch_via_bridge` 原先只捕获
+  `HTTPError` 与 `URLError`，实测有**六种**异常会穿透 `resolve()`，在命令行上
+  留下原始 traceback——而这恰恰是该静默降级的场合：
+
+  | 异常 | 触发场景 |
+  | --- | --- |
+  | `TimeoutError` | DSH 正在启动或卡住（**最可能的一种**） |
+  | `IncompleteRead` | body 短于 `Content-Length`，连接中途断 |
+  | `BadStatusLine` | 端口上跑的是别的进程，返回的不是 HTTP |
+  | `ConnectionResetError` | 对方在发状态行前 RST |
+  | `KeyError: 'url'` | 返回 `{"ok": true}` 却没有 `url` |
+  | `ValueError: unknown url type` | origin 没写 scheme |
+
+  现按异常族分别捕获，每种都带上可操作的提示（「DSH 正在重启？」、
+  「是否还在启动？」），并对缺失/非字符串的 `url` 显式报错。
+  另新增 `_normalise_origin()`，让 `localhost:3080` 这种写法也能用。
+- **`DSH_HOME` 被客户端忽略**：插件优先读 `$DSH_HOME`，客户端却写死
+  `~/.dsh`。自定义过 home 的用户永远找不到密钥，只会看到一个费解的
+  「未找到共享密钥」。现两端一致。
 - **`dsh-local-bridge` 插件此前根本无法加载**（发在独立仓库，0.1.0 → 0.1.1）。
   源码在任何 Node 上都会在 import 阶段抛 `SyntaxError`，也就是说按文档
   执行 `dsh plugin add` 的人装上的是一个不工作的插件。三个致命问题：
@@ -37,11 +57,9 @@
   `/api/local-bridge/auth`——**与实际代码 `BRIDGE_PATH = "/local-bridge/auth"`
   直接矛盾**，会引导使用者在 `/api` 下挂载，重蹈 401 的老路。
   现两处都写明「故意不在 `/api` 下」及原因。
-- **桥接返回非 JSON 时会崩掉 CLI**（`fetch_via_bridge` 只捕获 `HTTPError`
-  与 `URLError`）。反向代理的 HTML 错误页、或 DSH 重启到一半写出的响应，
-  都会让 `json.load()` 抛的 `JSONDecodeError`（一个 `ValueError`）穿透
-  `resolve()`，在 CLI 上留下原始 traceback——而这恰恰是最该优雅回退的场合。
-  现在转成 `BridgeError` 正常回退，并在 note 里提示「DSH 正在重启？」。
+- **桥接返回非 JSON 时会崩掉 CLI**：反向代理的 HTML 错误页、或 DSH 重启到
+  一半写出的响应，会让 `json.load()` 抛的 `JSONDecodeError`（一个
+  `ValueError`）穿透 `resolve()`。此项已包含在上一条的全面修复中。
 - **`pyproject.toml` 声明了不存在的文件**：`package-data` 写了
   `dshstudio = ["py.typed"]`，但该文件不在仓库里，打 wheel 会告警并静默丢弃。
   现已补上。

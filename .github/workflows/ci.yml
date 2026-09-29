@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes any in-flight run obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # The project is standard-library only on purpose, so there is nothing
+      # to install. This step exists to fail loudly if that ever stops being
+      # true rather than letting the suite quietly pass on a stale env.
+      # `tomllib` is 3.11+, so parse via regex here to stay 3.10-safe.
+      - name: Assert no runtime dependencies
+        run: |
+          python - <<'PY'
+          import re
+          src = open("pyproject.toml", encoding="utf-8").read()
+          block = re.search(r"^dependencies\s*=\s*\[(.*?)\]", src, re.S | re.M)
+          body = block.group(1) if block else ""
+          entries = [e for e in body.split(",") if e.strip()]
+          assert not entries, f"project declares runtime dependencies: {entries}"
+          print("ok: no runtime dependencies")
+          PY
+      - name: Byte-compile
+        run: python -m compileall -q dshstudio dsh_session.py dsh_bridge.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+  # The deprecated in-repo copy of the plugin must not drift from the real one.
+  # It is kept only for history, but if it is ever edited independently the two
+  # files start disagreeing about the route path — which is exactly the class of
+  # bug that already bit this project twice.
+  plugin-copy:
+    name: Deprecated plugin copy matches upstream
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare against dsh-local-bridge
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jijiwu3526/dsh-local-bridge/main/lib/index.js \
+            -o /tmp/upstream-index.js
+          curl -fsSL https://raw.githubusercontent.com/jijiwu3526/dsh-local-bridge/main/lib/types/index.d.ts \
+            -o /tmp/upstream-index.d.ts
+          diff -u /tmp/upstream-index.js dsh_bridge/plugin/index.js \
+            || { echo "::error::dsh_bridge/plugin/index.js has drifted from upstream"; exit 1; }
+          diff -u /tmp/upstream-index.d.ts dsh_bridge/plugin/index.d.ts \
+            || { echo "::error::dsh_bridge/plugin/index.d.ts has drifted from upstream"; exit 1; }
+          echo "ok: deprecated copy is identical to upstream"
+
+  # A credential or a home-directory path reaching a public repo is the one
+  # failure that cannot be caught by a test, because no test asserts on it.
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No token-shaped literals
+        run: |
+          if git grep -nE 'token=[A-Za-z0-9_-]{16,}' -- . \
+            | grep -v 'CHANGELOG.md'; then
+            echo "::error::a token-shaped literal is committed"; exit 1
+          fi
+          echo "ok"
+      - name: No machine-specific paths
+        run: |
+          if git grep -n '/Users/' -- .; then
+            echo "::error::a machine-specific absolute path is committed"; exit 1
+          fi
+          echo "ok"
+      - name: No committed session archives or memory
+        run: |
+          git ls-files | grep -E '\.session\.zip$|^records/|memory\.json$|cookies\.txt$' \
+            && { echo "::error::runtime artifact is committed"; exit 1; }
+          echo "ok"
+      - name: No instructions to install from the deprecated subdirectory
+        # `#subdir=` does not work on the pnpm build DSH ships with, and this
+        # subdirectory is a historical copy. Neither should be advertised in
+        # anything a newcomer reads. CHANGELOG entries quoting the old command
+        # are history, not instructions, so they are exempt.
+        run: |
+          if git grep -n 'dsh_bridge/plugin' -- '*.md' \
+            | grep -vE 'DEPRECATED\.md|INSTALL\.md|CHANGELOG\.md'; then
+            echo "::error::docs still point at the deprecated plugin subdirectory"; exit 1
+          fi
+          echo "ok"

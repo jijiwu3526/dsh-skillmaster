@@ -9,11 +9,14 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
+import http.server
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -219,6 +222,211 @@ class ResolveTests(BridgeServerMixin, unittest.TestCase):
         # The plugin registers this exact path. If it moves, this fails loudly
         # instead of producing a mysterious 404 at runtime.
         self.assertEqual(dsh_bridge.BRIDGE_PATH, "/local-bridge/auth")
+
+
+class TransportFailureTests(BridgeServerMixin, unittest.TestCase):
+    """A bridge that is down, restarting or half-written must never crash the CLI.
+
+    Each of these was observed escaping `resolve()` as a raw traceback before
+    the exception handling was widened. They are all ordinary conditions for
+    this client: the fallback chain exists precisely so they degrade quietly.
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ.pop("DSH_WEB_URL", None)
+
+    def _secret(self, tmp):
+        return self.write_secret(tmp)
+
+    @staticmethod
+    def _serve(handler_cls):
+        """Start a throwaway HTTP server and always close its socket."""
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
+    def _resolve_against(self, port_or_url, secret, timeout=2.0):
+        """`resolve()` must return a dict, never raise a non-BridgeError."""
+        try:
+            return dsh_bridge.resolve(port_or_url, secret, timeout=timeout)
+        except dsh_bridge.BridgeError:
+            return None
+
+    def test_timeout_falls_back(self):
+        """A DSH that is starting up accepts the socket then stalls."""
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        threading.Thread(
+            target=lambda: (lambda c: (time.sleep(5), c.close()))(srv.accept()[0]),
+            daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                result = self._resolve_against(f"http://127.0.0.1:{port}",
+                                               self._secret(Path(d)), timeout=1.0)
+        finally:
+            srv.close()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+        self.assertIn("超时", result["note"])
+
+    def test_truncated_body_falls_back(self):
+        """Content-Length promises more than the server sends."""
+        class Truncating(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", "500")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true, "url"')
+                self.close_connection = True
+
+        srv = self._serve(Truncating)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                result = self._resolve_against(
+                    f"http://127.0.0.1:{srv.server_address[1]}", self._secret(Path(d)))
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+        self.assertIn("中断", result["note"])
+
+    def test_non_http_garbage_falls_back(self):
+        """Another process on the port answering with something that is not HTTP."""
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+
+        def speak():
+            conn, _ = srv.accept()
+            conn.sendall(b"this is not http at all\r\n\r\n")
+            time.sleep(0.2)
+            conn.close()
+
+        threading.Thread(target=speak, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                result = self._resolve_against(f"http://127.0.0.1:{port}",
+                                               self._secret(Path(d)), timeout=3)
+        finally:
+            srv.close()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+
+    def test_connection_reset_falls_back(self):
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+
+        def reset():
+            conn, _ = srv.accept()
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                            b"\x01\x00\x00\x00\x00\x00\x00\x00")
+            conn.close()
+
+        threading.Thread(target=reset, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                result = self._resolve_against(f"http://127.0.0.1:{port}",
+                                               self._secret(Path(d)), timeout=3)
+        finally:
+            srv.close()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+
+    def test_ok_true_without_a_url_is_rejected(self):
+        """Version skew or a partial write; must not hand the caller None."""
+        class NoUrl(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"
+
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                body = json.dumps({"ok": True, "origin": "http://127.0.0.1:3080"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = self._serve(NoUrl)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                secret = self._secret(Path(d))
+                origin = f"http://127.0.0.1:{srv.server_address[1]}"
+                with self.assertRaises(dsh_bridge.BridgeError) as caught:
+                    dsh_bridge.fetch_via_bridge(origin, "s3cret", timeout=3)
+                self.assertIn("url", str(caught.exception))
+                result = self._resolve_against(origin, secret)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        self.assertEqual(result["source"], "plain-origin")
+
+    def test_empty_or_non_string_url_is_rejected(self):
+        for payload in ({"ok": True, "url": None}, {"ok": True, "url": ""},
+                        {"ok": True, "url": ["x"]}):
+            with self.subTest(payload=payload):
+                class Weird(http.server.BaseHTTPRequestHandler):
+                    protocol_version = "HTTP/1.0"
+
+                    def log_message(self, *a):
+                        pass
+
+                    def do_GET(self):
+                        body = json.dumps(payload).encode()
+                        self.send_response(200)
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+
+                srv = self._serve(Weird)
+                try:
+                    with self.assertRaises(dsh_bridge.BridgeError):
+                        dsh_bridge.fetch_via_bridge(
+                            f"http://127.0.0.1:{srv.server_address[1]}", "s3cret", timeout=3)
+                finally:
+                    srv.shutdown()
+                    srv.server_close()
+
+
+class OriginNormalisationTests(unittest.TestCase):
+    def test_schemeless_origin_gets_a_scheme(self):
+        self.assertEqual(dsh_bridge._normalise_origin("localhost:3080"),
+                         "http://localhost:3080")
+        self.assertEqual(dsh_bridge._normalise_origin("127.0.0.1:3080"),
+                         "http://127.0.0.1:3080")
+
+    def test_existing_scheme_is_kept(self):
+        self.assertEqual(dsh_bridge._normalise_origin("https://dsh.example"),
+                         "https://dsh.example")
+        self.assertEqual(dsh_bridge._normalise_origin("http://127.0.0.1:3080/"),
+                         "http://127.0.0.1:3080")
+
+    def test_empty_origin_falls_back_to_the_default(self):
+        self.assertEqual(dsh_bridge._normalise_origin(""), "http://127.0.0.1:3080")
+        self.assertEqual(dsh_bridge._normalise_origin("   "), "http://127.0.0.1:3080")
+
+    def test_secret_path_honours_a_custom_dsh_home(self):
+        """The plugin prefers $DSH_HOME; the client must look in the same place."""
+        with patch.dict(os.environ, {"DSH_HOME": "/tmp/custom-dsh"}):
+            import importlib
+            reloaded = importlib.reload(dsh_bridge)
+            try:
+                self.assertEqual(reloaded.DEFAULT_SECRET,
+                                 Path("/tmp/custom-dsh/local-bridge.secret"))
+            finally:
+                importlib.reload(dsh_bridge)
 
 
 class DefaultOriginTests(unittest.TestCase):

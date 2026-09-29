@@ -15,6 +15,7 @@ Nothing here ever writes the token to disk.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -24,7 +25,12 @@ import urllib.request
 from pathlib import Path
 
 BRIDGE_PATH = "/local-bridge/auth"
-DEFAULT_SECRET = Path.home() / ".dsh" / "local-bridge.secret"
+# Honour a custom DSH_HOME the same way the plugin does. Getting this wrong is
+# silent: the client looks in ~/.dsh, the plugin writes elsewhere, and the only
+# symptom is a mysterious "未找到共享密钥".
+DEFAULT_SECRET = Path(
+    os.environ.get("DSH_HOME") or Path.home() / ".dsh",
+) / "local-bridge.secret"
 
 
 class BridgeError(RuntimeError):
@@ -49,9 +55,31 @@ def read_secret(path: Path = DEFAULT_SECRET) -> str | None:
     return value or None
 
 
+def _normalise_origin(origin: str) -> str:
+    """Accept `host:port` and `https://host` as well as a full origin.
+
+    A schemeless value would otherwise reach urllib as a relative path and
+    fail with "unknown url type", which reads like a server problem when it is
+    really a misconfigured argument.
+    """
+    text = origin.strip().rstrip("/")
+    if not text:
+        return "http://127.0.0.1:3080"
+    if "://" in text:
+        return text
+    return f"http://{text}"
+
+
 def fetch_via_bridge(origin: str, secret: str, timeout: float = 10.0) -> dict:
-    """Ask the plugin for a freshly minted authenticated URL."""
-    url = f"{origin.rstrip('/')}{BRIDGE_PATH}"
+    """Ask the plugin for a freshly minted authenticated URL.
+
+    Every failure mode here has to become a `BridgeError`. A bridge that is
+    down, restarting, half-written, or speaking garbage is an ordinary
+    condition for this client — the whole point of the fallback chain is to
+    degrade quietly — and a raw traceback helps nobody.
+    """
+    origin = _normalise_origin(origin)
+    url = f"{origin}{BRIDGE_PATH}"
     request = urllib.request.Request(
         url, headers={"X-DSH-Bridge-Secret": secret, "Accept": "application/json"})
     # Never route a credential through an environment proxy.
@@ -64,13 +92,30 @@ def fetch_via_bridge(origin: str, secret: str, timeout: float = 10.0) -> dict:
         raise BridgeError(f"桥接返回 HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise BridgeError(f"无法连接桥接 {url}：{exc.reason}（DSH 是否在运行？）") from exc
-    except ValueError as exc:
+    except TimeoutError as exc:
+        # A DSH that is starting, or wedged, is the single most likely real
+        # failure — far likelier than a complete non-JSON body.
+        raise BridgeError(f"桥接超时（{timeout}s）：{url} 是否还在启动？") from exc
+    except http.client.HTTPException as exc:
+        # Truncated body (IncompleteRead), non-HTTP garbage (BadStatusLine) —
+        # neither is an OSError or a ValueError, so they need naming.
+        raise BridgeError(f"桥接响应中断（DSH 正在重启？）：{exc}") from exc
+    except json.JSONDecodeError as exc:
         # A 200 carrying something that is not JSON: an HTML error page from a
-        # proxy, a half-written body from a DSH restart mid-request. This is
-        # a bridge failure like any other and must fall back, not crash the CLI.
+        # proxy, or a body truncated between write and read.
         raise BridgeError(f"桥接返回的不是 JSON（DSH 正在重启？）：{exc}") from exc
+    except OSError as exc:
+        # Connection reset before the status line, and anything else the
+        # socket layer can throw that is not already a URLError.
+        raise BridgeError(f"无法连接桥接 {url}：{exc}（DSH 是否在运行？）") from exc
     if not isinstance(payload, dict) or not payload.get("ok"):
         raise BridgeError(f"桥接返回异常：{payload}")
+    url_value = payload.get("url")
+    if not isinstance(url_value, str) or not url_value:
+        # `ok: true` without a usable url is version skew or a partial write.
+        # Reporting it as a bridge failure keeps the fallback chain working
+        # instead of handing the caller a None it will try to open.
+        raise BridgeError("桥接返回 ok 但没有可用的 url")
     return payload
 
 
