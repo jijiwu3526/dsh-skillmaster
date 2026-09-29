@@ -46,18 +46,28 @@
  *   to the DSH process. The threat model is "stray local tooling and
  *   accidental disclosure", not "malware already running as me".
  */
-import { randomBytes, writeFileSync, unlinkSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
 export const name = "dsh-local-bridge";
-export const inject = ["connection", "webserver"];
+export const inject = ["connection", "webServer"];
 
-/** Path holding the per-boot shared secret. 0600, rewritten every boot. */
-const SECRET_PATH = join(
-	process.env.DSH_HOME || join(homedir(), ".dsh"),
-	"local-bridge.secret",
-);
+/**
+ * Path holding the per-boot shared secret. 0600, rewritten every boot.
+ *
+ * Resolved on each call rather than once at module load: a module-level const
+ * would freeze whatever `DSH_HOME` happened to be when the file was first
+ * imported, so a later re-activation under a different home would write the
+ * secret somewhere the client is not looking.
+ */
+function secretPath() {
+	return join(
+		process.env.DSH_HOME || join(homedir(), ".dsh"),
+		"local-bridge.secret",
+	);
+}
 
 /** Absolute route path. Deliberately outside `/api` — see the header comment. */
 export const BRIDGE_PATH = "/local-bridge/auth";
@@ -73,12 +83,13 @@ function mintSecret() {
 
 /** Write the shared secret with owner-only permissions. */
 function persistSecret(value) {
+	const target = secretPath();
 	// Passing `mode` only applies on creation, so remove any stale file first
 	// to guarantee the secret is never briefly world-readable.
 	try {
-		unlinkSync(SECRET_PATH);
+		unlinkSync(target);
 	} catch {}
-	writeFileSync(SECRET_PATH, value, { mode: 0o600 });
+	writeFileSync(target, value, { mode: 0o600 });
 }
 
 /**
@@ -106,7 +117,10 @@ function send(res, status, body) {
 export function apply(ctx) {
 	secret = mintSecret();
 	persistSecret(secret);
-	ctx.effect(() => unlinkSync(SECRET_PATH), "dsh-local-bridge: cleanup");
+	// `ctx.effect` takes a body that RETURNS a disposer, not the cleanup
+	// itself. Passing `() => unlinkSync(...)` would unlink during startup and
+	// register nothing, so the secret file would outlive the process.
+	ctx.effect(() => () => unlinkSync(secretPath()), "dsh-local-bridge: cleanup");
 
 	ctx.webServer.register({
 		kind: "exact",
@@ -138,7 +152,7 @@ export function apply(ctx) {
 				return;
 			}
 
-			send(res, 200, { ok: true, url, origin: base, secretPath: SECRET_PATH });
+			send(res, 200, { ok: true, url, origin: base, secretPath: secretPath() });
 		},
 	});
 }

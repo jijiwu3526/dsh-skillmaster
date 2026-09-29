@@ -7,9 +7,10 @@ export declare const inject: string[];
 /**
  * Absolute route path. Deliberately OUTSIDE `/api`.
  *
- * DSH authenticates the whole `/api` channel before dispatching, so a bridge
- * mounted there is unreachable by the very unauthenticated caller it serves.
- * The plugin registers via `ctx.webServer.register()` to sit beside `/api`.
+ * DSH authenticates the whole `/api` channel before dispatching to any route
+ * on it, so a bridge mounted there is unreachable by the very unauthenticated
+ * caller it serves — a chicken-and-egg problem. The plugin registers via
+ * `ctx.webServer.register()` to sit beside `/api` instead.
  */
 export declare const BRIDGE_PATH: "/local-bridge/auth";
 

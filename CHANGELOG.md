@@ -18,11 +18,30 @@
 
 ### 修复
 
+- **`dsh-local-bridge` 插件此前根本无法加载**（发在独立仓库，0.1.0 → 0.1.1）。
+  源码在任何 Node 上都会在 import 阶段抛 `SyntaxError`，也就是说按文档
+  执行 `dsh plugin add` 的人装上的是一个不工作的插件。三个致命问题：
+  - `randomBytes` 从 `node:fs` 导入（它属于 `node:crypto`）。
+    `node --check` **发现不了**——它只做语法解析，不解析 ESM 具名导出。
+    这正是此前一路「验证通过」却没暴露的原因。
+  - `inject` 里服务名写成 `webserver`，宿主实际是 `webServer`。
+  - `ctx.effect(() => unlinkSync(path))` 用法错误：`ctx.effect` 要求回调
+    **返回** disposer，原写法会在启动时就删掉密钥文件且什么都没注册，
+    密钥因此活过进程生命周期。
+  - `SECRET_PATH` 在模块加载时求值，冻结了当时的 `DSH_HOME`；已改为惰性求值。
+
+  本机已安装的那份是修正过的，所以此前一直在正常使用——**问题只存在于
+  GitHub 上那份**，任何新装的人都会中招。详见插件仓库的 CHANGELOG。
 - **类型声明指向了错误路径**：`dsh_bridge/plugin/index.d.ts` 里 `BRIDGE_PATH`
   的注释仍写「on the shared `/api` channel」，`cordis.patch.yml` 注释写的则是
   `/api/local-bridge/auth`——**与实际代码 `BRIDGE_PATH = "/local-bridge/auth"`
   直接矛盾**，会引导使用者在 `/api` 下挂载，重蹈 401 的老路。
   现两处都写明「故意不在 `/api` 下」及原因。
+- **桥接返回非 JSON 时会崩掉 CLI**（`fetch_via_bridge` 只捕获 `HTTPError`
+  与 `URLError`）。反向代理的 HTML 错误页、或 DSH 重启到一半写出的响应，
+  都会让 `json.load()` 抛的 `JSONDecodeError`（一个 `ValueError`）穿透
+  `resolve()`，在 CLI 上留下原始 traceback——而这恰恰是最该优雅回退的场合。
+  现在转成 `BridgeError` 正常回退，并在 note 里提示「DSH 正在重启？」。
 - **`pyproject.toml` 声明了不存在的文件**：`package-data` 写了
   `dshstudio = ["py.typed"]`，但该文件不在仓库里，打 wheel 会告警并静默丢弃。
   现已补上。
