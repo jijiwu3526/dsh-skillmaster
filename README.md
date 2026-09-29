@@ -55,14 +55,25 @@ dsh plugin --profile web add github:jijiwu3526/dsh-local-bridge
 
 ## 三分钟上手
 
-```bash
-# 1. 启动 DSH Web，保留终端打印的完整 URL（新版带 ?token=）
-dsh --profile web
+前提：DSH 已在运行，且下面二选一已经做好——
 
-# 2. 看有哪些预设
+- **已装桥接插件**（推荐）：`dsh plugin --profile web add github:jijiwu3526/dsh-local-bridge`
+  后重启 DSH。脚本会自己取得 token，**下面不用传任何 URL**。
+- **未装插件**：把 DSH 启动时打印的完整 URL（含 `?token=`）设进环境变量：
+
+  ```bash
+  export DSH_WEB_URL='http://127.0.0.1:3080/?token=...'
+  ```
+
+```bash
+# 1. 看有哪些预设
 python3 dsh_session.py presets
 
-# 3. 一站式建会话：创建 + 首发消息（否则侧栏看不见）+ 记录这次选择
+# 2. 一站式建会话：创建 + 首发消息（否则侧栏看见）+ 记录这次选择
+#    --workspace-id 必填，填 DSH 里已有工作区的 ID
+#    （工作区在 DSH 侧栏点开后即可看到其标识）。
+#    若手头没有现成工作区，改用 dsh_session.py new --workspace-path <目录>，
+#    它会先把目录登记成工作区再建会话。
 python3 -m dshstudio.cli create \
     --preset standard \
     --text "开工" \
@@ -70,10 +81,10 @@ python3 -m dshstudio.cli create \
     --archive records/s.zip \
     --scenario "日常开发"
 
-# 4. 从导出里学习该预设的真实工具面
+# 3. 从导出里学习该预设的真实工具面
 python3 -m dshstudio.cli observe records/s.zip --notes "日常开发"
 
-# 5. 以后就能问它该用哪个预设
+# 4. 以后就能问它该用哪个预设
 python3 -m dshstudio.cli recommend --want bash,read --avoid present
 ```
 
@@ -88,7 +99,7 @@ python3 -m dshstudio.cli recommend --want bash,read --avoid present
 | `presets/` | 实际使用的预设配置留档 |
 | `tools/` | 协议保真测试、故障注入与隔离性测试脚本 |
 | `templates/` | 需求访谈、规格确认、Creator 施工指令 |
-| `tests/` | 24 项自动化测试 |
+| `tests/` | 61 项自动化测试 |
 
 ## 已知边界
 
@@ -96,6 +107,7 @@ python3 -m dshstudio.cli recommend --want bash,read --avoid present
   不在任何预设的权威清单里，却出现在所有会话中。要真正限制工具面，
   必须在宿主配置层处理，改预设无效。
 - **会话无法通过 API 删除。** DSH 没有 `session/delete` 端点，误建的会话只能在 Web 侧栏处理。
+- **空白会话在侧栏不可见**，因为 DSH 标记 `blank: true`。用 `send` 发一条即可。
 - **推荐只覆盖已学习过的预设。** 先 `observe` 若干归档，候选才会变多。
 - **记忆文件含本机绝对路径**（`~/.config/dsh-conversation-studio/memory.json`），
   分享前请处理。详见 [会话资料保存方案](docs/会话资料保存方案.md)。
@@ -105,7 +117,7 @@ python3 -m dshstudio.cli recommend --want bash,read --avoid present
 ## 开发
 
 ```bash
-python3 -m unittest discover -s tests -v      # 24 项
+python3 -m unittest discover -s tests -v      # 61 项
 export DSH_WEB_URL='http://127.0.0.1:3080/?token=...'
 python3 tools/preset_robustness.py            # 故障注入（不消耗配额）
 ```
@@ -213,15 +225,10 @@ python3 -m dshstudio.cli incident review-focused "挂载失败：prefix missing"
 | `docs/资料来源.md` | 上游依据与核对日期 |
 | `tests/test_dsh_session.py` | 模拟两代 DSH Web 的协议测试 |
 | `tests/test_memory.py` | 画像提取、记忆持久化与推荐排序测试 |
+| `tests/test_bridge.py` | 桥接客户端的三级回退与传输失败降级测试 |
+| `tests/test_packaging.py` | 打包元数据：本地 import 是否都被打进 wheel |
 
-  不由预设决定，它们由宿主 profile 注入，会出现在任何预设的会话里。
-  要真正限制工具面，必须在宿主配置层处理。
-- **推荐只覆盖已学习过的预设。** 先 `observe` 若干归档，候选才会变多。
-- **会话无法通过 API 删除。** DSH 没有 `session/delete` 端点，误建的空白会话
-  只能在 Web 侧栏处理。
-- **空白会话在侧栏不可见**，因为 DSH 标记 `blank: true`。用 `send` 发一条即可。
-
-运行测试：`python3 -m unittest discover -s tests -v`。
+运行测试：`python3 -m unittest discover -s tests -v`（61 项）。
 
 ---
 

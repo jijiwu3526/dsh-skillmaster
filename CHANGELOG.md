@@ -2,6 +2,42 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.2] — 2026-09-29
+
+发布卫生修复。三个 ship-blocker 已被子智能体审计查出并修掉，
+这一版把发布产物本身做对。
+
+### 修复
+
+- **v0.3.0 的 zip 仍在分发，且带着那个 bug**。v0.3.1 修的正是
+  `py-modules` 漏了 `dsh_bridge`，但 v0.3.1 没挂任何产物，于是
+  Release 页面上唯一能下载到的，还是含 `py-modules = ["dsh_session"]`
+  的 v0.3.0 包——「最新版」页面上写着一个下载不到的修复。
+  本版重新从 tag 生成 zip 并挂上，同时把 v0.3.0 标记为已被取代。
+- **README 里的测试数是过时的**：「24 项」出现在两处，实际已 61 项。
+  这是全仓库最容易被核对的数字，偏偏是错的。
+- **README 仍是一份拼接文档**：`已知边界` 之外还留着一段被截断的
+  孤立文字（一个 bullet 的首行被删掉了），渲染成无上下文的缩进块。
+  现已删掉，并把两个新增的测试文件补进「包内内容」表。
+- **已废弃副本的 `package.json` 停在 `0.1.0`**，而线上是 `0.1.2`。
+  这恰恰是两份 README 教用户 `grep` 来确认自己装的是哪个版本的文件。
+  现在与上游完全一致，且 CI 的逐字节比对从两个文件扩展到四个
+  （新增 `package.json` 与 `cordis.patch.yml`）。
+- **`dsh_bridge/README.md` 教的是手动卸载**（`rm` 目录 + 手改
+  `cordis.patch.yml`），与插件 README 明确警告「DSH 看不到手工装的东西」
+  直接冲突。改为 `dsh plugin --profile web remove`。
+
+### 文档
+
+- **三分钟上手补上前提**：原文第 2 步直接 `dsh_session.py presets`，
+  既没装插件也没设 `DSH_WEB_URL`，陌生人跑到这里必然失败且看不到原因。
+  现在先说清两条路（装插件 / 设环境变量），并解释 `--workspace-id`
+  这个必填项从哪来。
+- CHANGELOG 里「三个致命问题」与插件 release notes 的「四个」对不上——
+  列表里本来就是四条。已改为四个，并补记第 0.1.2 版才修的重载失效问题。
+- 插件 README 的「随时铸造」改为「现场铸造」：密钥是每次启动轮换的，
+  「随时」是个代码并不提供的保证。
+
 ## [0.3.1] — 2026-09-29
 
 ### 修复
@@ -70,7 +106,7 @@
   「未找到共享密钥」。现两端一致。
 - **`dsh-local-bridge` 插件此前根本无法加载**（发在独立仓库，0.1.0 → 0.1.1）。
   源码在任何 Node 上都会在 import 阶段抛 `SyntaxError`，也就是说按文档
-  执行 `dsh plugin add` 的人装上的是一个不工作的插件。三个致命问题：
+  执行 `dsh plugin add` 的人装上的是一个不工作的插件。四个致命问题：
   - `randomBytes` 从 `node:fs` 导入（它属于 `node:crypto`）。
     `node --check` **发现不了**——它只做语法解析，不解析 ESM 具名导出。
     这正是此前一路「验证通过」却没暴露的原因。
@@ -82,6 +118,11 @@
 
   本机已安装的那份是修正过的，所以此前一直在正常使用——**问题只存在于
   GitHub 上那份**，任何新装的人都会中招。详见插件仓库的 CHANGELOG。
+- **插件重载一次就永久失效**（0.1.2 修的，与上面四个同一类：注册了资源
+  却没有归属它的 effect）。`webServer.register()` 返回的 disposer 被丢弃，
+  而它遇到重复路径会直接抛错。于是 HMR 重载或改配置后，旧路由仍在表里，
+  下一次 `apply()` 死在 `duplicate exact route` 上。cordis 会把这个异常吞进
+  一个死掉的 fiber，进程照常运行——最终既没有路由也没有密钥文件。
 - **类型声明指向了错误路径**：`dsh_bridge/plugin/index.d.ts` 里 `BRIDGE_PATH`
   的注释仍写「on the shared `/api` channel」，`cordis.patch.yml` 注释写的则是
   `/api/local-bridge/auth`——**与实际代码 `BRIDGE_PATH = "/local-bridge/auth"`

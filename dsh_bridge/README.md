@@ -44,6 +44,11 @@ python3 dsh_session.py presets   # 省略 --url 时自动走桥接
 ## 卸载
 
 ```bash
-rm ~/.dsh/profiles/web/node_modules/dsh-local-bridge
-# 并从 cordis.patch.yml 移除 dsh-local-bridge 那个 insert 条目
+dsh plugin --profile web remove dsh-local-bridge
 ```
+
+然后完整重启 DSH。密钥文件在进程退出时自动删除。
+
+⚠️ 不要直接 `rm` 掉 `node_modules` 里的目录再手改 `cordis.patch.yml`——
+那是本项目早期踩过的坑：DSH 完全看不到手工装的东西，`dsh plugin list` 认不出它，
+后续任何 pnpm 操作都可能把它清掉。用 `dsh plugin add` / `remove`。

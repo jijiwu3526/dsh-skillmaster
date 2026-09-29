@@ -1,29 +1,18 @@
 {
   "name": "dsh-local-bridge",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "让本机 CLI 自行取得 DSH Web 的带 token URL，无需人工从终端复制",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
-  "engines": {
-    "dsh": ">=0.1.5-rc.1"
-  },
+  "engines": { "dsh": ">=0.1.5-rc.1", "node": ">=20" },
   "exports": {
-    ".": {
-      "types": "./lib/types/index.d.ts",
-      "default": "./lib/index.js"
-    }
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" }
   },
-  "files": [
-    "lib",
-    "cordis.patch.yml",
-    "README.md"
-  ],
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
-  },
-  "keywords": ["dsh", "deepseek-harness", "local", "authentication", "cli"]
+  "files": ["lib", "cordis.patch.yml", "README.md", "LICENSE"],
+  "scripts": { "test": "node --test" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "keywords": ["dsh", "deepseek-harness", "local", "authentication", "cli"],
+  "repository": { "type": "git", "url": "git+https://github.com/jijiwu3526/dsh-local-bridge.git" }
 }

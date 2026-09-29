@@ -58,14 +58,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compare against dsh-local-bridge
         run: |
-          curl -fsSL https://raw.githubusercontent.com/jijiwu3526/dsh-local-bridge/main/lib/index.js \
-            -o /tmp/upstream-index.js
-          curl -fsSL https://raw.githubusercontent.com/jijiwu3526/dsh-local-bridge/main/lib/types/index.d.ts \
-            -o /tmp/upstream-index.d.ts
-          diff -u /tmp/upstream-index.js dsh_bridge/plugin/index.js \
-            || { echo "::error::dsh_bridge/plugin/index.js has drifted from upstream"; exit 1; }
-          diff -u /tmp/upstream-index.d.ts dsh_bridge/plugin/index.d.ts \
-            || { echo "::error::dsh_bridge/plugin/index.d.ts has drifted from upstream"; exit 1; }
+          base=https://raw.githubusercontent.com/jijiwu3526/dsh-local-bridge/main
+          for pair in \
+            "lib/index.js:dsh_bridge/plugin/index.js" \
+            "lib/types/index.d.ts:dsh_bridge/plugin/index.d.ts" \
+            "package.json:dsh_bridge/plugin/package.json" \
+            "cordis.patch.yml:dsh_bridge/plugin/cordis.patch.yml"; do
+            remote="${pair%%:*}"
+            local="${pair##*:}"
+            curl -fsSL "$base/$remote" -o /tmp/upstream-file
+            diff -u /tmp/upstream-file "$local" \
+              || { echo "::error::$local has drifted from upstream $remote"; exit 1; }
+          done
           echo "ok: deprecated copy is identical to upstream"
 
   # A credential or a home-directory path reaching a public repo is the one
