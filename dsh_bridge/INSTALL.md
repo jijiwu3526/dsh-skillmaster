@@ -17,7 +17,7 @@ https://github.com/jijiwu3526/dsh-local-bridge
 dsh plugin --profile web add github:jijiwu3526/dsh-local-bridge
 ```
 
-然后**重启 DSH**。
+然后**完整重启 DSH 进程**（见下方「从 0.1.0 升级」）。
 
 ## 为什么只需要这一步
 
@@ -84,6 +84,27 @@ dsh plugin --profile web remove dsh-local-bridge
 ```
 
 然后重启 DSH。密钥文件在进程退出时自动删除。
+
+## 从 0.1.0 升级
+
+⚠️ **必须完整重启 DSH 进程，不能只替换插件文件。**
+
+0.1.0 丢弃了 `webServer.register()` 返回的 disposer，旧路由因此在插件卸载后
+仍留在路由表里。直接换文件会让新实例撞上
+`webserver: duplicate exact route "/local-bridge/auth"` 而加载失败——此时
+既没有路由也没有密钥文件，桥接会一直不通，直到你**完全退出并重启 DSH**。
+
+```bash
+dsh plugin --profile web add github:jijiwu3526/dsh-local-bridge
+# 然后完整重启 DSH 进程（不是改配置）
+```
+
+确认版本：
+
+```bash
+grep '"version"' ~/.dsh/profiles/web/node_modules/dsh-local-bridge/package.json
+# 期望 0.1.2 或更高
+```
 
 ## 前提
 
