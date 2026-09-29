@@ -99,7 +99,7 @@ python3 -m dshstudio.cli recommend --want bash,read --avoid present
 | `presets/` | 实际使用的预设配置留档 |
 | `tools/` | 协议保真测试、故障注入与隔离性测试脚本 |
 | `templates/` | 需求访谈、规格确认、Creator 施工指令 |
-| `tests/` | 61 项自动化测试 |
+| `tests/` | 67 项自动化测试 |
 
 ## 已知边界
 
@@ -117,7 +117,7 @@ python3 -m dshstudio.cli recommend --want bash,read --avoid present
 ## 开发
 
 ```bash
-python3 -m unittest discover -s tests -v      # 61 项
+python3 -m unittest discover -s tests -v      # 67 项
 export DSH_WEB_URL='http://127.0.0.1:3080/?token=...'
 python3 tools/preset_robustness.py            # 故障注入（不消耗配额）
 ```
@@ -228,7 +228,7 @@ python3 -m dshstudio.cli incident review-focused "挂载失败：prefix missing"
 | `tests/test_bridge.py` | 桥接客户端的三级回退与传输失败降级测试 |
 | `tests/test_packaging.py` | 打包元数据：本地 import 是否都被打进 wheel |
 
-运行测试：`python3 -m unittest discover -s tests -v`（61 项）。
+运行测试：`python3 -m unittest discover -s tests -v`（67 项）。
 
 ---
 

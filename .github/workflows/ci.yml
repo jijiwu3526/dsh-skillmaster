@@ -46,6 +46,38 @@ jobs:
         run: python -m compileall -q dshstudio dsh_session.py dsh_bridge.py
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      # The test count is the single most checkable number in the repo, and
+      # it went stale twice — once when a fix landed and once when more tests
+      # were added for it. Deriving it here means the docs cannot drift
+      # without CI noticing.
+      - name: README test count matches reality
+        run: |
+          python - <<'PY'
+          import re, subprocess, sys
+          out = subprocess.run(
+              [sys.executable, "-m", "unittest", "discover", "-s", "tests"],
+              capture_output=True, text=True)
+          m = re.search(r"^Ran (\d+) tests?", out.stderr, re.M)
+          if not m:
+              print(out.stderr[-800:]); raise SystemExit("could not count tests")
+          actual = int(m.group(1))
+          # A "N 项" claim is only about the suite when it is a bare number.
+          # "4/4 项需求" is a ratio in sample output, and "17 项" elsewhere
+          # would be a per-module breakdown — so require the run to be the
+          # whole test-suite phrasing.
+          bad = []
+          for i, line in enumerate(
+                  open("README.md", encoding="utf-8").read().splitlines(), 1):
+              for n in re.findall(r"(?<![\d/])(\d+)\s*项(?:自动化测试|（|）)", line):
+                  if int(n) != actual:
+                      bad.append(f"README.md:{i} says {n} 项, suite runs {actual}")
+              for n in re.findall(r"#\s*(\d+)\s*项", line):
+                  if int(n) != actual:
+                      bad.append(f"README.md:{i} says {n} 项, suite runs {actual}")
+          if bad:
+              raise SystemExit("stale test count:\n  " + "\n  ".join(bad))
+          print(f"ok: every README claim matches the suite size ({actual})")
+          PY
 
   # The deprecated in-repo copy of the plugin must not drift from the real one.
   # It is kept only for history, but if it is ever edited independently the two
