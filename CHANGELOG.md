@@ -2,6 +2,36 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.3] — 2026-09-29
+
+一次**由收窄引入的回归**。0.3.0 把 `except ValueError` 收窄成
+`except json.JSONDecodeError` 是为了修「schemeless origin 被误报成
+不是 JSON」——但它顺手漏掉了一整类。
+
+### 修复
+
+- **响应不是合法 UTF-8 时会崩掉 CLI**（回归）。`json.load` 读的是文本，
+  所以 body 里出现非法字节会抛 `UnicodeDecodeError`——它是个 `ValueError`，
+  但**不是** `JSONDecodeError`，于是从所有异常分支之间漏了出去：
+  代理返回 gzip 页面、DSH 重启时把一个多字节字符写了一半，都会让
+  `resolve()` 和 `main()` 留下原始 traceback。这正是 0.3.0 那类改动
+  本该消灭的失败模式。现单列一条 `UnicodeDecodeError` 子句。
+- **密钥文件不是 UTF-8 时会崩掉 CLI**。`read_secret` 只捕获 `OSError`，
+  而 `UnicodeDecodeError` 不是 `OSError`——它在**任何网络请求之前**就抛，
+  所以把 `fetch_via_bridge` 的异常处理写得多周全都救不了。
+  现与「文件不存在」同等处理：都当作没有密钥，走下一级回退。
+- **再兜一层底**（让函数文档的说法成立）：深嵌套 JSON 抛
+  `RecursionError`（属于 `RuntimeError`，前面所有子句都看不见它），
+  而超过 CPython 整数位数上限的合法 JSON 抛的是普通 `ValueError` 而非
+  `JSONDecodeError`。两者都属于「这个响应没法用」。
+- **一个测试会永久污染模块状态**：`test_secret_path_honours_a_custom_dsh_home`
+  的恢复用的 `importlib.reload` 写在 `patch.dict` **内部**，于是
+  `DEFAULT_SECRET` 在整个进程剩余时间里都指向临时路径。同一进程里后续
+  任何用默认 `--secret-file` 的代码都会去错误的地方找密钥。
+  现把恢复移到 `patch.dict` 之外，并断言恢复后的值。
+
+新增 6 项测试覆盖上述各条。变异测试确认：把这四处改回原样，6 项转红。
+
 ## [0.3.2] — 2026-09-29
 
 发布卫生修复。三个 ship-blocker 已被子智能体审计查出并修掉，
@@ -79,8 +109,9 @@
 - **CI**（`.github/workflows/ci.yml`）—— Python 3.10/3.11/3.12/3.13 跑 `unittest`；
   另有 secret 扫描（token 字面量、本机绝对路径、误提交的运行产物）与
   「已废弃的插件副本必须与上游逐字节一致」检查。插件仓库另有自己的 CI。
-- **插件测试**（`dsh-local-bridge` 仓库的 `test/index.test.js`，28 项）——
+- **插件测试**（`dsh-local-bridge` 仓库的 `test/index.test.js`）——
   此前的插件代码没有任何测试。新测试用 mock ctx 确认三道防护各自真的会挡。
+  （0.3.0 时为 28 项，0.1.2 又加了 4 项路由生命周期测试，现 32 项。）
 - `dsh_bridge/plugin/DEPRECATED.md` —— 标记包内的旧插件副本仅供历史参考。
 
 ### 修复

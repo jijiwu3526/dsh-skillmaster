@@ -66,7 +66,10 @@ jobs:
             "cordis.patch.yml:dsh_bridge/plugin/cordis.patch.yml"; do
             remote="${pair%%:*}"
             local="${pair##*:}"
-            curl -fsSL "$base/$remote" -o /tmp/upstream-file
+            # A transient network failure must not read as "has drifted".
+            # A 404 from a renamed path still fails, which is correct.
+            rm -f /tmp/upstream-file
+            curl -fsSL --retry 3 --retry-all-errors "$base/$remote" -o /tmp/upstream-file
             diff -u /tmp/upstream-file "$local" \
               || { echo "::error::$local has drifted from upstream $remote"; exit 1; }
           done
@@ -80,12 +83,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Full history so the scan below can look at what was *already*
+          # pushed, not just the current tree. A secret scan that only reads
+          # HEAD would call a repo with a leaked credential in its history
+          # "clean".
           fetch-depth: 0
       - name: No token-shaped literals
         run: |
           if git grep -nE 'token=[A-Za-z0-9_-]{16,}' -- . \
             | grep -v 'CHANGELOG.md'; then
             echo "::error::a token-shaped literal is committed"; exit 1
+          fi
+          # A credential deleted in a later commit is still leaked.
+          if git log -p --all -G 'token=[A-Za-z0-9_-]{16,}' \
+            -- . ':!CHANGELOG.md' --format='%H' | grep -E '^\+.*token=[A-Za-z0-9_-]{16,}'; then
+            echo "::error::a token-shaped literal exists in history"; exit 1
           fi
           echo "ok"
       - name: No machine-specific paths

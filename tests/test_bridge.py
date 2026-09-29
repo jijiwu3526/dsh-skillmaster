@@ -80,6 +80,13 @@ class FakeBridge(BaseHTTPRequestHandler):
 
 
 class BridgeServerMixin:
+    @staticmethod
+    def _serve(handler_cls):
+        """Start a throwaway HTTP server and always close its socket."""
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeBridge)
@@ -239,13 +246,6 @@ class TransportFailureTests(BridgeServerMixin, unittest.TestCase):
     def _secret(self, tmp):
         return self.write_secret(tmp)
 
-    @staticmethod
-    def _serve(handler_cls):
-        """Start a throwaway HTTP server and always close its socket."""
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        return srv
-
     def _resolve_against(self, port_or_url, secret, timeout=2.0):
         """`resolve()` must return a dict, never raise a non-BridgeError."""
         try:
@@ -400,6 +400,97 @@ class TransportFailureTests(BridgeServerMixin, unittest.TestCase):
                     srv.server_close()
 
 
+class UndecodableResponseTests(BridgeServerMixin, unittest.TestCase):
+    """Bodies that are not decodable must degrade, not crash.
+
+    Catching only `json.JSONDecodeError` looks like a narrowing that helps,
+    but a body that is not valid UTF-8 raises `UnicodeDecodeError` — a
+    `ValueError` that is NOT a `JSONDecodeError`. That is a regression the
+    narrowing introduced, and it is the ordinary case of a gzipped proxy
+    page or a multibyte character cut in half by a DSH restart.
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ.pop("DSH_WEB_URL", None)
+
+    def _serve_raw(self, body: bytes, *, declare_length: bool = True):
+        class Raw(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"
+
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                if declare_length:
+                    self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = self._serve(Raw)
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def test_invalid_utf8_falls_back(self):
+        origin = self._serve_raw(b'{"ok": true, "url": "http://x/\xff"}')
+        with tempfile.TemporaryDirectory() as d:
+            result = TransportFailureTests._resolve_against(
+                self, origin, self.write_secret(Path(d)), timeout=3)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+        self.assertIn("UTF-8", result["note"])
+
+    def test_truncated_multibyte_falls_back(self):
+        # A restart mid-write leaves a half-written multibyte character.
+        body = '{"ok": true, "url": "http://x/'.encode() + "项目".encode()[:5]
+        origin = self._serve_raw(body)
+        with tempfile.TemporaryDirectory() as d:
+            result = TransportFailureTests._resolve_against(
+                self, origin, self.write_secret(Path(d)), timeout=3)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+
+    def test_gzip_body_without_content_encoding_falls_back(self):
+        origin = self._serve_raw(b"\x1f\x8b\x08\x00" + b"\x00" * 40)
+        with tempfile.TemporaryDirectory() as d:
+            result = TransportFailureTests._resolve_against(
+                self, origin, self.write_secret(Path(d)), timeout=3)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+
+    def test_deeply_nested_json_falls_back(self):
+        # RecursionError is a RuntimeError, so no ValueError clause sees it.
+        origin = self._serve_raw(b"[" * 200_000 + b"]" * 200_000)
+        with tempfile.TemporaryDirectory() as d:
+            result = TransportFailureTests._resolve_against(
+                self, origin, self.write_secret(Path(d)), timeout=5)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+
+    def test_oversized_integer_literal_falls_back(self):
+        # Valid JSON, so not a JSONDecodeError — a bare ValueError from
+        # CPython's int/str digit limit.
+        origin = self._serve_raw(b'{"ok": true, "n": ' + b"9" * 5000 + b"}")
+        with tempfile.TemporaryDirectory() as d:
+            result = TransportFailureTests._resolve_against(
+                self, origin, self.write_secret(Path(d)), timeout=3)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], "plain-origin")
+
+    def test_corrupt_secret_file_is_treated_as_absent(self):
+        # read_secret runs before any request, so a bad file used to crash
+        # the CLI before the fallback chain could even be consulted.
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "local-bridge.secret"
+            bad.write_bytes(b"\xff\xfe\x00bad")
+            self.assertIsNone(dsh_bridge.read_secret(bad))
+            result = dsh_bridge.resolve("http://127.0.0.1:1", bad, timeout=1)
+        self.assertEqual(result["source"], "plain-origin")
+        self.assertIn("未找到共享密钥", result["note"])
+
+
 class OriginNormalisationTests(unittest.TestCase):
     def test_schemeless_origin_gets_a_scheme(self):
         self.assertEqual(dsh_bridge._normalise_origin("localhost:3080"),
@@ -418,15 +509,29 @@ class OriginNormalisationTests(unittest.TestCase):
         self.assertEqual(dsh_bridge._normalise_origin("   "), "http://127.0.0.1:3080")
 
     def test_secret_path_honours_a_custom_dsh_home(self):
-        """The plugin prefers $DSH_HOME; the client must look in the same place."""
-        with patch.dict(os.environ, {"DSH_HOME": "/tmp/custom-dsh"}):
-            import importlib
-            reloaded = importlib.reload(dsh_bridge)
-            try:
+        """The plugin prefers $DSH_HOME; the client must look in the same place.
+
+        `DEFAULT_SECRET` is computed at import time, so exercising it means
+        reloading the module — and the restore MUST happen after the env var
+        is gone. Reloading inside `patch.dict` left `DEFAULT_SECRET` pinned to
+        the temp path for the rest of the process, so every later test using
+        the default `--secret-file` would silently look in the wrong place.
+        """
+        import importlib
+
+        original = dsh_bridge.DEFAULT_SECRET
+        self.addCleanup(importlib.reload, dsh_bridge)
+        try:
+            with patch.dict(os.environ, {"DSH_HOME": "/tmp/custom-dsh"}):
+                reloaded = importlib.reload(dsh_bridge)
                 self.assertEqual(reloaded.DEFAULT_SECRET,
                                  Path("/tmp/custom-dsh/local-bridge.secret"))
-            finally:
-                importlib.reload(dsh_bridge)
+        finally:
+            # Outside the patch, so the reload sees the real environment.
+            os.environ.pop("DSH_HOME", None)
+            restored = importlib.reload(dsh_bridge)
+        self.assertEqual(restored.DEFAULT_SECRET, original)
+        self.assertEqual(dsh_bridge.DEFAULT_SECRET, original)
 
 
 class DefaultOriginTests(unittest.TestCase):

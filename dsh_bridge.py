@@ -50,7 +50,11 @@ def _default_origin() -> str:
 def read_secret(path: Path = DEFAULT_SECRET) -> str | None:
     try:
         value = path.read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError is not an OSError, so a secret file that is not
+        # valid UTF-8 used to crash before this function could return. A
+        # corrupt secret is indistinguishable from an absent one, and
+        # degrading to the next fallback rung is the right answer for both.
         return None
     return value or None
 
@@ -104,10 +108,23 @@ def fetch_via_bridge(origin: str, secret: str, timeout: float = 10.0) -> dict:
         # A 200 carrying something that is not JSON: an HTML error page from a
         # proxy, or a body truncated between write and read.
         raise BridgeError(f"桥接返回的不是 JSON（DSH 正在重启？）：{exc}") from exc
+    except UnicodeDecodeError as exc:
+        # A body that is not valid UTF-8 — a gzipped page, or a multibyte
+        # character cut in half by a restart mid-write. This is a ValueError
+        # but NOT a JSONDecodeError, so it needs its own clause; catching only
+        # JSONDecodeError here regressed exactly this case.
+        raise BridgeError(f"桥接返回的不是 UTF-8 文本（DSH 正在重启？）：{exc}") from exc
     except OSError as exc:
         # Connection reset before the status line, and anything else the
         # socket layer can throw that is not already a URLError.
         raise BridgeError(f"无法连接桥接 {url}：{exc}（DSH 是否在运行？）") from exc
+    except (RecursionError, ValueError) as exc:
+        # The backstop that makes the docstring true. Deeply nested JSON
+        # exhausts the stack (RecursionError is a RuntimeError, so no earlier
+        # clause sees it), and a syntactically valid integer literal longer
+        # than CPython's digit limit is a plain ValueError, not a
+        # JSONDecodeError. Both are "this response was not usable".
+        raise BridgeError(f"桥接返回无法解析（DSH 正在重启？）：{exc}") from exc
     if not isinstance(payload, dict) or not payload.get("ok"):
         raise BridgeError(f"桥接返回异常：{payload}")
     url_value = payload.get("url")

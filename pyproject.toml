@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dsh-conversation-studio"
-version = "0.3.2"
+version = "0.3.3"
 description = "为 DeepSeek Harness 创建、归档并记忆 Agent Preset 会话"
 readme = "README.md"
 requires-python = ">=3.10"
